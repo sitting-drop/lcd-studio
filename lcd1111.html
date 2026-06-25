@@ -1,0 +1,319 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>ESP32 CYD Precision Painter + Mirror</title>
+    <style>
+        :root { --bg: #1a1a1a; --primary: #00d2ff; --mirror: #ff9f43; --green: #2ecc71; }
+        body { font-family: sans-serif; background: var(--bg); color: white; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        header { padding: 10px 20px; background: #222; display: flex; justify-content: space-between; border-bottom: 2px solid var(--primary); }
+        
+        #main-layout { display: flex; flex: 1; overflow: hidden; }
+        #editor { flex: 1; display: flex; align-items: center; justify-content: center; background: #111; position: relative; }
+        
+        #toolbar { width: 300px; min-width: 300px; background: #252525; padding: 15px; display: flex; flex-direction: column; gap: 10px; height: 100%; border-right: 1px solid #444; overflow-y: auto; }
+        .btn { padding: 10px; cursor: pointer; border: none; border-radius: 4px; background: #333; color: white; text-align: left; transition: 0.2s; font-size: 13px;}
+        .btn:hover { background: #444; }
+        .btn.active { background: var(--primary); color: black; font-weight: bold; }
+        
+        .btn-mirror { background: #444; border: 1px solid var(--mirror); color: var(--mirror); text-align: center; font-weight: bold; padding: 10px; cursor: pointer; border-radius: 4px;}
+        .btn-mirror.active { background: var(--mirror); color: black; }
+
+        .btn-download { background: var(--green); color: black; font-weight: bold; border: none; padding: 10px; text-align: center; border-radius: 4px; cursor: pointer; transition: 0.2s;}
+        .btn-download:hover { background: #27ae60; }
+
+        #canvas-container { position: relative; width: 320px; height: 240px; border: 5px solid #444; }
+        canvas { position: absolute; top: 0; left: 0; image-rendering: pixelated; }
+        #mainCanvas { z-index: 1; background: #000; }
+        #tempCanvas { z-index: 2; pointer-events: none; }
+        
+        #mirror-line { 
+            position: absolute; top: 0; left: 160px; width: 1px; height: 100%; 
+            border-left: 1px dashed var(--mirror); z-index: 3; display: none; pointer-events: none;
+        }
+
+        .guide-box {
+            background: #192a3a; border: 1px solid #294b6e; padding: 12px;
+            margin-top: 5px; border-radius: 6px; font-size: 12px; line-height: 1.5;
+        }
+        .guide-box h4 { margin: 0 0 6px 0; color: var(--primary); }
+        .guide-box ul { margin: 0; padding-left: 16px; color: #ccc; }
+        .guide-box li { margin-bottom: 5px; }
+
+        /* Style cho mục nhập chân phần cứng */
+        .config-box {
+            background: #2d2d2d; border: 1px solid #444; padding: 12px; border-radius: 6px; font-size: 13px;
+        }
+        .config-box h4 { margin: 0 0 8px 0; color: var(--mirror); }
+        .input-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .input-group label { color: #bbb; font-size: 12px; }
+        .input-group input { width: 60px; background: #111; border: 1px solid #555; color: #fff; padding: 4px; text-align: center; border-radius: 3px; }
+
+        #code-output { position: fixed; inset: 50px; background: #000; color: #0f0; padding: 20px; display: none; z-index: 100; border: 1px solid var(--primary); overflow: auto; }
+    </style>
+</head>
+<body>
+
+<header>
+    <strong>ESP32 CYD PAINTER - SMART MIRROR</strong>
+    <button onclick="exportCode()" style="background:var(--primary); padding: 5px 15px; border-radius: 4px; cursor: pointer; border:none; font-weight: bold;">XUẤT CODE C++</button>
+</header>
+
+<div id="main-layout">
+    <div id="toolbar">
+        <div class="guide-box">
+            <h4>📖 HƯỚNG DẪN SỬ DỤNG MÃ</h4>
+            <ul>
+                <li>Vẽ hình, xuất code lấy mảng <code>myBitmap</code>.</li>
+                <li>Điều chỉnh các chân GPIO bên dưới cho khớp với mạch rồi bấm nút tải file setup cấu hình nhanh.</li>
+            </ul>
+        </div>
+
+        <div class="config-box">
+            <h4>🛠️ CẤU HÌNH CHÂN (PINS)</h4>
+            <div class="input-group"><label>TFT_MISO (Hàng đợi):</label><input type="number" id="p_miso" value="12"></div>
+            <div class="input-group"><label>TFT_MOSI (SDA):</label><input type="number" id="p_mosi" value="13"></div>
+            <div class="input-group"><label>TFT_SCLK (SCL):</label><input type="number" id="p_sclk" value="14"></div>
+            <div class="input-group"><label>TFT_CS (Chọn chip):</label><input type="number" id="p_cs" value="15"></div>
+            <div class="input-group"><label>TFT_DC (Lệnh/Dữ liệu):</label><input type="number" id="p_dc" value="2"></div>
+            <div class="input-group"><label>TFT_BL (Đèn nền):</label><input type="number" id="p_bl" value="21"></div>
+            <button class="btn-download" style="width: 100%; margin-top: 8px;" onclick="downloadUserSetup()">💾 TẢI FILE USER_SETUP.H</button>
+        </div>
+
+        <hr style="width:100%; border:0.5px solid #444; margin: 2px 0;">
+        <label style="font-size: 11px; font-weight: bold; color: #aaa;">MÀU VÀ CÔNG CỤ</label>
+        <input type="color" id="colorPicker" value="#00ff00" style="width:100%; height:35px; cursor:pointer; background: none; border: 1px solid #555;">
+        
+        <button class="btn-mirror" id="mirrorBtn" onclick="toggleMirror()">🪞 ĐỐI XỨNG: TẮT</button>
+        
+        <hr style="width:100%; border:0.5px solid #444; margin: 2px 0;">
+        <button class="btn active" id="pen" onclick="setTool('pen')">🖌️ Bút vẽ tự do</button>
+        <button class="btn" id="line" onclick="setTool('line')">📏 Đường thẳng</button>
+        <button class="btn" id="rect" onclick="setTool('rect')">⬜ Hình chữ nhật</button>
+        <button class="btn" id="circle" onclick="setTool('circle')">⭕ Hình tròn</button>
+        <button class="btn" id="fill" onclick="setTool('fill')">🪣 Đổ màu (Fill)</button>
+        
+        <hr style="width:100%; border:0.5px solid #444; margin: 2px 0;">
+        <button class="btn" onclick="undo()">↩ Hoàn tác (Undo)</button>
+        <button class="btn" onclick="if(confirm('Xóa hết dữ liệu trên canvas?')) clearAll()" style="color:#ff4444; font-weight: bold;">🗑️ Xóa sạch</button>
+    </div>
+
+    <div id="editor">
+        <div id="canvas-container">
+            <div id="mirror-line"></div>
+            <canvas id="mainCanvas" width="320" height="240"></canvas>
+            <canvas id="tempCanvas" width="320" height="240"></canvas>
+        </div>
+    </div>
+</div>
+
+<div id="code-output">
+    <button onclick="this.parentElement.style.display='none'" style="float:right; background:red; color:white; border:none; padding:5px 10px; cursor:pointer; font-weight:bold; border-radius:3px;">ĐÓNG</button>
+    <h3 style="color:var(--primary); margin-top:0;">MÃ MẢNG BITMAP (CHỈ COPY MẢNG NÀY):</h3>
+    <pre id="cppText" style="user-select: all;"></pre>
+</div>
+
+<script>
+    const mCanvas = document.getElementById('mainCanvas');
+    const mCtx = mCanvas.getContext('2d', {willReadFrequently: true});
+    const tCanvas = document.getElementById('tempCanvas');
+    const tCtx = tCanvas.getContext('2d');
+    
+    let isDrawing = false;
+    let tool = 'pen';
+    let isMirror = false;
+    let startX, startY;
+    let history = [];
+
+    function toggleMirror() {
+        isMirror = !isMirror;
+        const btn = document.getElementById('mirrorBtn');
+        const line = document.getElementById('mirror-line');
+        btn.classList.toggle('active');
+        btn.innerText = isMirror ? "🪞 ĐỐI XỨNG: BẬT" : "🪞 ĐỐI XỨNG: TẮT";
+        line.style.display = isMirror ? "block" : "none";
+    }
+
+    function saveState() {
+        if(history.length > 20) history.shift();
+        history.push(mCanvas.toDataURL());
+    }
+
+    function getMousePos(e) {
+        const rect = mCanvas.getBoundingClientRect();
+        return {
+            x: (e.clientX - rect.left) * (mCanvas.width / rect.width),
+            y: (e.clientY - rect.top) * (mCanvas.height / rect.height)
+        };
+    }
+
+    mCanvas.onmousedown = (e) => {
+        isDrawing = true;
+        const pos = getMousePos(e);
+        startX = pos.x; startY = pos.y;
+        if(tool === 'pen') { mCtx.beginPath(); mCtx.moveTo(startX, startY); }
+        if(tool === 'fill') {
+            floodFill(Math.floor(startX), Math.floor(startY));
+            if(isMirror) floodFill(320 - Math.floor(startX), Math.floor(startY));
+        }
+    };
+
+    window.onmousemove = (e) => {
+        if(!isDrawing) return;
+        const pos = getMousePos(e);
+        const color = document.getElementById('colorPicker').value;
+        tCtx.clearRect(0,0,320,240);
+        tCtx.strokeStyle = color; tCtx.lineWidth = 2;
+
+        if(tool === 'pen') {
+            drawStep(mCtx, startX, startY, pos.x, pos.y, color);
+            if(isMirror) drawStep(mCtx, 320-startX, startY, 320-pos.x, pos.y, color);
+            startX = pos.x; startY = pos.y;
+        } else if(tool === 'line') {
+            tCtx.beginPath(); tCtx.moveTo(startX, startY); tCtx.lineTo(pos.x, pos.y); tCtx.stroke();
+            if(isMirror) { tCtx.moveTo(320-startX, startY); tCtx.lineTo(320-pos.x, pos.y); tCtx.stroke(); }
+        } else if(tool === 'rect') {
+            tCtx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+            if(isMirror) tCtx.strokeRect(320-startX - (pos.x - startX), startY, pos.x - startX, pos.y - startY);
+        } else if(tool === 'circle') {
+            const r = Math.sqrt(Math.pow(pos.x - startX, 2) + Math.pow(pos.y - startY, 2));
+            tCtx.beginPath(); tCtx.arc(startX, startY, r, 0, Math.PI*2); tCtx.stroke();
+            if(isMirror) { tCtx.beginPath(); tCtx.arc(320-startX, startY, r, 0, Math.PI*2); tCtx.stroke(); }
+        }
+    };
+
+    function drawStep(ctx, x1, y1, x2, y2, col) {
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+
+    window.onmouseup = (e) => {
+        if(!isDrawing) return;
+        const pos = getMousePos(e);
+        const color = document.getElementById('colorPicker').value;
+        mCtx.strokeStyle = color; mCtx.lineWidth = 2;
+
+        if(tool === 'line') {
+            mCtx.beginPath(); mCtx.moveTo(startX, startY); mCtx.lineTo(pos.x, pos.y); mCtx.stroke();
+            if(isMirror) { mCtx.beginPath(); mCtx.moveTo(320-startX, startY); mCtx.lineTo(320-pos.x, pos.y); mCtx.stroke(); }
+        } else if(tool === 'rect') {
+            const w = pos.x - startX; const h = pos.y - startY;
+            mCtx.strokeRect(startX, startY, w, h);
+            if(isMirror) mCtx.strokeRect(320-startX - w, startY, w, h);
+        } else if(tool === 'circle') {
+            const r = Math.sqrt(Math.pow(pos.x - startX, 2) + Math.pow(pos.y - startY, 2));
+            mCtx.beginPath(); mCtx.arc(startX, startY, r, 0, Math.PI*2); mCtx.stroke();
+            if(isMirror) { mCtx.beginPath(); mCtx.arc(320-startX, startY, r, 0, Math.PI*2); mCtx.stroke(); }
+        }
+        isDrawing = false; tCtx.clearRect(0,0,320,240); saveState();
+    };
+
+    function setTool(t) {
+        tool = t;
+        document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(t).classList.add('active');
+    }
+
+    function undo() {
+        if(history.length > 1) {
+            history.pop();
+            let img = new Image();
+            img.src = history[history.length-1];
+            img.onload = () => { mCtx.clearRect(0,0,320,240); mCtx.drawImage(img,0,0); };
+        }
+    }
+
+    function clearAll() { mCtx.fillStyle="black"; mCtx.fillRect(0,0,320,240); saveState(); }
+    clearAll();
+
+    function floodFill(x, y) {
+        const color = document.getElementById('colorPicker').value;
+        const r = parseInt(color.substr(1,2), 16), g = parseInt(color.substr(3,2), 16), b = parseInt(color.substr(5,2), 16);
+        const imgData = mCtx.getImageData(0,0,320,240);
+        const data = imgData.data;
+        const targetIdx = (Math.floor(y) * 320 + Math.floor(x)) * 4;
+        const tr = data[targetIdx], tg = data[targetIdx+1], tb = data[targetIdx+2];
+        if(tr === r && tg === g && tb === b) return;
+        const queue = [[Math.floor(x), Math.floor(y)]];
+        while(queue.length) {
+            const [cx, cy] = queue.shift();
+            const idx = (cy * 320 + cx) * 4;
+            if(cx >=0 && cx < 320 && cy >= 0 && cy < 240 && data[idx] === tr && data[idx+1] === tg && data[idx+2] === tb) {
+                data[idx]=r; data[idx+1]=g; data[idx+2]=b; data[idx+3]=255;
+                queue.push([cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]);
+            }
+        }
+        mCtx.putImageData(imgData, 0, 0);
+    }
+
+    function exportCode() {
+        const data = mCtx.getImageData(0,0,320,240).data;
+        let out = "const uint16_t myBitmap[76800] PROGMEM = {\n";
+        for(let i=0; i<data.length; i+=4) {
+            let r=data[i], g=data[i+1], b=data[i+2];
+            let rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+            out += "0x" + rgb565.toString(16).toUpperCase().padStart(4, '0') + ", ";
+            if((i/4+1)%16 === 0) out += "\n";
+        }
+        out += "};";
+        document.getElementById('cppText').innerText = out;
+        document.getElementById('code-output').style.display = 'block';
+    }
+
+    // HÀM TẠO NỘI DUNG FILE VÀ ÉP TRÌNH DUYỆT TẢI XUỐNG
+    function downloadUserSetup() {
+        const miso = document.getElementById('p_miso').value;
+        const mosi = document.getElementById('p_mosi').value;
+        const sclk = document.getElementById('p_sclk').value;
+        const cs = document.getElementById('p_cs').value;
+        const dc = document.getElementById('p_dc').value;
+        const bl = document.getElementById('p_bl').value;
+
+        // Nội dung chuẩn hóa dựa trên cấu hình tệp tin của bạn gửi
+        let fileContent = `// USER DEFINED SETTINGS - GENERATED BY PRECISION PAINTER
+#define USER_SETUP_INFO "User_Setup"
+
+// Section 1. Driver
+#define ST7789_DRIVER
+#define TFT_RGB_ORDER TFT_BGR
+#define TFT_INVERSION_OFF
+
+// Section 2. Pins Cấu hình từ Web Giao diện
+#define TFT_BL ${bl}
+#define TFT_BACKLIGHT_ON HIGH
+
+#define TFT_MISO ${miso}
+#define TFT_MOSI ${mosi}
+#define TFT_SCLK ${sclk}
+#define TFT_CS   ${cs}
+#define TFT_DC   ${dc}
+#define TFT_RST  -1
+
+// Section 3. Fonts
+#define LOAD_GLCD
+#define LOAD_FONT2
+#define LOAD_FONT4
+#define LOAD_FONT6
+#define LOAD_FONT7
+#define LOAD_FONT8
+#define LOAD_GFXFF
+#define SMOOTH_FONT
+
+// Section 4. Frequency
+#define SPI_FREQUENCY       55000000
+#define SPI_READ_FREQUENCY  20000000
+#define SPI_TOUCH_FREQUENCY  2500000
+#define USE_HSPI_PORT
+`;
+
+        // Kỹ thuật Blob tạo file ảo để tải xuống trong Javascript
+        const blob = new Blob([fileContent], { type: "text/plain;charset=utf-8" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "User_Setup.h";
+        link.click();
+        URL.revokeObjectURL(link.href);
+    }
+</script>
+</body>
+</html>
