@@ -56,7 +56,16 @@
 
 <header>
     <strong>ESP32 CYD PAINTER - SMART MIRROR</strong>
-    <button onclick="exportCode()" style="background:var(--primary); padding: 5px 15px; border-radius: 4px; cursor: pointer; border:none; font-weight: bold;">XUẤT CODE C++</button>
+
+    <div style="display:flex;gap:8px;">
+        <button onclick="exportCode()" style="background:var(--primary);padding:5px 15px;border-radius:4px;cursor:pointer;border:none;font-weight:bold;">
+            XUẤT CODE C++
+        </button>
+
+        <button onclick="showCoords()" style="background:#ff9f43;padding:5px 15px;border-radius:4px;cursor:pointer;border:none;font-weight:bold;">
+            TỌA ĐỘ ĐÃ GHI
+        </button>
+    </div>
 </header>
 
 <div id="main-layout">
@@ -106,6 +115,10 @@ void drawFixedImage(int x, int y, int w, int h, const uint16_t* img) {
         <button class="btn" id="rect" onclick="setTool('rect')">⬜ Hình chữ nhật</button>
         <button class="btn" id="circle" onclick="setTool('circle')">⭕ Hình tròn</button>
         <button class="btn" id="fill" onclick="setTool('fill')">🪣 Đổ màu (Fill)</button>
+
+<button class="btn" id="coord" onclick="setTool('coord')">📍 Chế độ tọa độ CYD</button>
+
+
         
         <hr style="width:100%; border:0.5px solid #444; margin: 2px 0;">
         <button class="btn" onclick="undo()">↩ Hoàn tác (Undo)</button>
@@ -120,7 +133,30 @@ void drawFixedImage(int x, int y, int w, int h, const uint16_t* img) {
         </div>
     </div>
 </div>
+<div id="coord-output"
+style="
+position:fixed;
+inset:50px;
+background:#000;
+color:#0f0;
+padding:20px;
+display:none;
+z-index:101;
+overflow:auto;
+border:1px solid orange;
+">
 
+<button onclick="copyCoords()">📋 COPY TS_POINT</button>
+
+<button onclick="clearCoords()">🗑 XÓA</button>
+
+<button onclick="hideCoords()">ĐÓNG</button>
+
+<h3>TỌA ĐỘ ĐÃ GHI</h3>
+
+<pre id="coordText"></pre>
+
+</div>
 <div id="code-output">
     <button onclick="this.parentElement.style.display='none'" style="float:right; background:red; color:white; border:none; padding:5px 10px; cursor:pointer; font-weight:bold; border-radius:3px;">ĐÓNG</button>
     <h3 style="color:var(--primary); margin-top:0;">MÃ MẢNG BITMAP (CHỈ COPY MẢNG NÀY):</h3>
@@ -137,7 +173,8 @@ void drawFixedImage(int x, int y, int w, int h, const uint16_t* img) {
     let tool = 'pen';
     let isMirror = false;
     let startX, startY;
-    let history = [];
+  let history = [];
+let touchPoints = [];
 
     function toggleMirror() {
         isMirror = !isMirror;
@@ -165,7 +202,17 @@ void drawFixedImage(int x, int y, int w, int h, const uint16_t* img) {
         isDrawing = true;
         const pos = getMousePos(e);
         startX = pos.x; startY = pos.y;
-        if(tool === 'pen') { mCtx.beginPath(); mCtx.moveTo(startX, startY); }
+        if(tool === 'coord'){
+            const tx=Math.round(188+(pos.x/319)*(3823-188));
+            const ty=Math.round(282+(pos.y/239)*(3853-282));
+            const tz=Math.round(2075-(pos.y/239)*(610));
+            drawStep(mCtx,startX,startY,pos.x,pos.y,color);
+            coordData.push(`X:${tx} | Y:${ty} | Z:${tz}`);
+            document.getElementById('coordBox').value=coordData.join('\n');
+            startX=pos.x;
+            startY=pos.y;
+        }
+        else if(tool === 'pen') { mCtx.beginPath(); mCtx.moveTo(startX, startY); }
         if(tool === 'fill') {
             floodFill(Math.floor(startX), Math.floor(startY));
             if(isMirror) floodFill(320 - Math.floor(startX), Math.floor(startY));
@@ -178,7 +225,45 @@ void drawFixedImage(int x, int y, int w, int h, const uint16_t* img) {
         const color = document.getElementById('colorPicker').value;
         tCtx.clearRect(0,0,320,240);
         tCtx.strokeStyle = color; tCtx.lineWidth = 2;
+if(tool === 'coord'){
 
+    const tx = Math.round(
+        188 + (pos.x / 319) * (3823 - 188)
+    );
+
+    const ty = Math.round(
+        282 + (pos.y / 239) * (3853 - 282)
+    );
+
+    const tz = Math.round(
+        2075 - (pos.y / 239) * (2075 - 1465)
+    );
+
+    drawStep(
+        mCtx,
+        startX,
+        startY,
+        pos.x,
+        pos.y,
+        color
+    );
+
+    touchPoints.push({
+        x:tx,
+        y:ty,
+        z:tz
+    });
+
+    document.getElementById("coordText").textContent =
+        touchPoints
+        .map(p=>`X:${p.x} | Y:${p.y} | Z:${p.z}`)
+        .join("\n");
+
+    startX = pos.x;
+    startY = pos.y;
+
+    return;
+}
         if(tool === 'pen') {
             drawStep(mCtx, startX, startY, pos.x, pos.y, color);
             if(isMirror) drawStep(mCtx, 320-startX, startY, 320-pos.x, pos.y, color);
@@ -325,6 +410,33 @@ void drawFixedImage(int x, int y, int w, int h, const uint16_t* img) {
         link.click();
         URL.revokeObjectURL(link.href);
     }
+function showCoords(){
+    document.getElementById("coord-output").style.display="block";
+}
+
+function hideCoords(){
+    document.getElementById("coord-output").style.display="none";
+}
+
+function clearCoords(){
+    touchPoints = [];
+    document.getElementById("coordText").textContent = "";
+}
+
+function copyCoords(){
+
+    let txt = "TS_Point path[] = {\n";
+
+    touchPoints.forEach(p=>{
+        txt += ` {${p.x}, ${p.y}, ${p.z}},\n`;
+    });
+
+    txt += "};";
+
+    navigator.clipboard.writeText(txt);
+
+    alert("Đã copy TS_Point[]");
+}
 </script>
 </body>
 </html>
